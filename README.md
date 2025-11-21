@@ -18,7 +18,7 @@
 
 ## 💾 Download:
 
-[https://github.com/jhin1m/manhwa-sticher/release](https://github.com/jhin1m/manhwa-sticher/release)
+[https://github.com/jhin1m/manhwa-sticher/releases](https://github.com/jhin1m/manhwa-sticher/releases)
 
 ## 🛠️ Yêu cầu hệ thống (Development)
 

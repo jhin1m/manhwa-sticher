@@ -1,156 +1,299 @@
 <script lang="ts">
-  import { invoke } from "@tauri-apps/api/core";
+  import { open } from '@tauri-apps/plugin-dialog';
+  import { invoke } from '@tauri-apps/api/core';
+  import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
-  let name = $state("");
-  let greetMsg = $state("");
+  let inputFolder = $state<string | null>(null);
+  let outputFolder = $state<string | null>(null);
 
-  async function greet(event: Event) {
-    event.preventDefault();
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    greetMsg = await invoke("greet", { name });
+  let splitHeight = $state(5000);
+  let sensitivity = $state(90);
+  let scanLineStep = $state(5);
+  let ignorableBorder = $state(5);
+
+  let isProcessing = $state(false);
+  let progress = $state(0);
+  let statusMessage = $state("");
+
+  interface ProgressUpdate {
+    current: number;
+    total: number;
+    percentage: number;
+    message: string;
+  }
+
+  interface ProcessResult {
+    success: boolean;
+    message: string;
+    outputFiles: string[];
+    totalImages: number;
+  }
+
+  async function selectInputFolder() {
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+      });
+      if (selected) {
+        inputFolder = selected as string;
+        // Default output folder to input folder + "_output" if not set
+        if (!outputFolder) {
+          outputFolder = selected + "_output";
+        }
+      }
+    } catch (err) {
+      console.error("Failed to open dialog:", err);
+    }
+  }
+
+  async function selectOutputFolder() {
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+      });
+      if (selected) {
+        outputFolder = selected as string;
+      }
+    } catch (err) {
+      console.error("Failed to open dialog:", err);
+    }
+  }
+
+  async function startProcessing() {
+    if (!inputFolder || !outputFolder) return;
+
+    isProcessing = true;
+    progress = 0;
+    statusMessage = "Starting...";
+
+    let unlisten: UnlistenFn | null = null;
+
+    try {
+      // Listen for progress updates
+      unlisten = await listen<ProgressUpdate>('processing-progress', (event) => {
+        const { percentage, message } = event.payload;
+        progress = percentage;
+        statusMessage = message;
+      });
+
+      // Invoke the Rust command
+      const result = await invoke<ProcessResult>('process_images', {
+        inputFolder,
+        outputFolder,
+        splitHeight,
+        sensitivity,
+        scanLineStep,
+        ignorableBorder,
+      });
+
+      if (result.success) {
+        statusMessage = `Success! Generated ${result.outputFiles.length} images from ${result.totalImages} source images.`;
+        progress = 100;
+      } else {
+        statusMessage = `Failed: ${result.message}`;
+      }
+    } catch (e) {
+      statusMessage = `Error: ${e}`;
+      progress = 0;
+    } finally {
+      // Clean up event listener
+      if (unlisten) {
+        unlisten();
+      }
+      isProcessing = false;
+    }
   }
 </script>
 
 <main class="container">
-  <h1>Welcome to Tauri + Svelte</h1>
+  <h1>Manhwa Stitcher</h1>
 
-  <div class="row">
-    <a href="https://vite.dev" target="_blank">
-      <img src="/vite.svg" class="logo vite" alt="Vite Logo" />
-    </a>
-    <a href="https://tauri.app" target="_blank">
-      <img src="/tauri.svg" class="logo tauri" alt="Tauri Logo" />
-    </a>
-    <a href="https://svelte.dev" target="_blank">
-      <img src="/svelte.svg" class="logo svelte-kit" alt="SvelteKit Logo" />
-    </a>
+  <div class="card">
+    <h2>1. Input</h2>
+    <div class="row">
+      <input type="text" value={inputFolder ?? ''} readonly placeholder="Select input folder..." />
+      <button onclick={selectInputFolder}>Browse</button>
+    </div>
   </div>
-  <p>Click on the Tauri, Vite, and SvelteKit logos to learn more.</p>
 
-  <form class="row" onsubmit={greet}>
-    <input id="greet-input" placeholder="Enter a name..." bind:value={name} />
-    <button type="submit">Greet</button>
-  </form>
-  <p>{greetMsg}</p>
+  <div class="card">
+    <h2>2. Settings</h2>
+    
+    <div class="setting-item">
+      <label>
+        <span>Split Height (px)</span>
+        <input type="number" bind:value={splitHeight} min="1000" step="100" />
+      </label>
+    </div>
+
+    <div class="setting-item">
+      <label>
+        <span>Sensitivity ({sensitivity}%)</span>
+        <input type="range" bind:value={sensitivity} min="0" max="100" />
+      </label>
+    </div>
+
+    <div class="setting-item">
+      <label>
+        <span>Scan Line Step (px)</span>
+        <input type="number" bind:value={scanLineStep} min="1" max="100" />
+      </label>
+    </div>
+    
+     <div class="setting-item">
+      <label>
+        <span>Ignorable Border (px)</span>
+        <input type="number" bind:value={ignorableBorder} min="0" max="50" />
+      </label>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>3. Output</h2>
+    <div class="row">
+      <input type="text" value={outputFolder ?? ''} readonly placeholder="Select output folder..." />
+      <button onclick={selectOutputFolder}>Browse</button>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="primary" onclick={startProcessing} disabled={isProcessing || !inputFolder || !outputFolder}>
+      {isProcessing ? 'Processing...' : 'Start Process'}
+    </button>
+  </div>
+
+  {#if isProcessing || progress > 0}
+    <div class="status">
+      <div class="progress-bar">
+        <div class="progress-fill" style="width: {progress}%"></div>
+      </div>
+      <p>{statusMessage}</p>
+    </div>
+  {/if}
 </main>
 
 <style>
-.logo.vite:hover {
-  filter: drop-shadow(0 0 2em #747bff);
-}
-
-.logo.svelte-kit:hover {
-  filter: drop-shadow(0 0 2em #ff3e00);
-}
-
-:root {
-  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: 400;
-
-  color: #0f0f0f;
-  background-color: #f6f6f6;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  -webkit-text-size-adjust: 100%;
-}
-
-.container {
-  margin: 0;
-  padding-top: 10vh;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  text-align: center;
-}
-
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: 0.75s;
-}
-
-.logo.tauri:hover {
-  filter: drop-shadow(0 0 2em #24c8db);
-}
-
-.row {
-  display: flex;
-  justify-content: center;
-}
-
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-
-a:hover {
-  color: #535bf2;
-}
-
-h1 {
-  text-align: center;
-}
-
-input,
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  color: #0f0f0f;
-  background-color: #ffffff;
-  transition: border-color 0.25s;
-  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
-}
-
-button {
-  cursor: pointer;
-}
-
-button:hover {
-  border-color: #396cd8;
-}
-button:active {
-  border-color: #396cd8;
-  background-color: #e8e8e8;
-}
-
-input,
-button {
-  outline: none;
-}
-
-#greet-input {
-  margin-right: 5px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #f6f6f6;
-    background-color: #2f2f2f;
+  :global(body) {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: #f0f2f5;
+    margin: 0;
+    padding: 20px;
+    color: #333;
+  }
+  
+  .container {
+    max-width: 600px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
   }
 
-  a:hover {
-    color: #24c8db;
+  h1 {
+    text-align: center;
+    color: #1a1a1a;
+    margin-bottom: 10px;
   }
 
-  input,
+  h2 {
+    font-size: 1.1rem;
+    margin-top: 0;
+    margin-bottom: 15px;
+    color: #555;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 10px;
+  }
+
+  .card {
+    background: white;
+    padding: 20px;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+  }
+
+  .row {
+    display: flex;
+    gap: 10px;
+  }
+
+  input[type="text"] {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    background: #f9f9f9;
+  }
+
   button {
-    color: #ffffff;
-    background-color: #0f0f0f98;
+    padding: 8px 16px;
+    border: none;
+    border-radius: 6px;
+    background: #e0e0e0;
+    cursor: pointer;
+    font-weight: 500;
+    transition: background 0.2s;
   }
-  button:active {
-    background-color: #0f0f0f69;
-  }
-}
 
+  button:hover {
+    background: #d0d0d0;
+  }
+
+  button.primary {
+    background: #007bff;
+    color: white;
+    width: 100%;
+    padding: 12px;
+    font-size: 1.1rem;
+  }
+
+  button.primary:hover {
+    background: #0069d9;
+  }
+
+  button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .setting-item {
+    margin-bottom: 15px;
+  }
+
+  .setting-item label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .setting-item input[type="number"] {
+    width: 80px;
+    padding: 6px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+  }
+  
+  .setting-item input[type="range"] {
+    width: 150px;
+  }
+
+  .status {
+    margin-top: 10px;
+    text-align: center;
+  }
+
+  .progress-bar {
+    height: 8px;
+    background: #e0e0e0;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 8px;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: #007bff;
+    transition: width 0.3s ease;
+  }
 </style>

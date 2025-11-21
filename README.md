@@ -82,7 +82,3 @@ Artifacts sẽ nằm trong thư mục `src-tauri/target/release/bundle/`.
 ## 📮 Liên hệ
 
   * GitHub: [@jhin1m](https://github.com/jhin1m)
-
------
-
-Bạn muốn tôi tóm tắt thêm về một phần cụ thể nào đó (ví dụ: quy trình Release) không?
